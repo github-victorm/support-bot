@@ -5,9 +5,9 @@ A customer support chatbot for a music store, built using LangGraph, LangSmith, 
 ## 🎯 Key Features
 
 - **Intelligent Music Recommendations**: Semantic search over music catalog using embeddings
-- **Secure Customer Data Access**: Role-based access control for customer information
-- **Human-in-the-Loop Purchase Approvals**: Staff review and approval workflow
-- **Persistent Conversation State**: SQLite-based thread management
+- **Secure Customer Data Access**: Users can only access their own data
+- **Human-in-the-Loop Purchase Approvals**: User review and approval workflow for purchases
+- **Persistent Conversation State**: LangGraph's  state management
 - **LangSmith Integration**: Full observability and tracing
 - **Modern Streamlit UI**: Beautiful, responsive interface
 
@@ -22,28 +22,7 @@ A customer support chatbot for a music store, built using LangGraph, LangSmith, 
    - Persists to disk for fast startup
    - Uses OpenAI embeddings for high-quality results
 
-2. **LangGraph Workflow**
 
-   ```
-   START
-     │
-     ▼
-   Assistant ◄─────┐
-     │            │
-     ▼            │
-   Tools ─────────┘
-     │
-     ▼
-   Human Approval
-     │
-     ▼
-    END
-   ```
-
-   - Cyclic graph for complex conversations
-   - Tool executor for database operations
-   - Human-in-the-loop node for purchase approvals
-   - State persistence using SQLite
 
 3. **State Management**
 

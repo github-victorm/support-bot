@@ -1,11 +1,17 @@
 {
-  "dockerfile_lines": [],
+  "node_version": "20",
   "graphs": {
-    "agent": "./muaic_store_agent.py:graph"
+    "music_store": "./music_store_agent.py:create_graph"
   },
   "env": "./.env",
   "python_version": "3.11",
-  "dependencies": [
-    "."
+  "dependencies": ["."],
+  "dockerfile_lines": [
+    "COPY . /app",
+    "WORKDIR /app",
+    "RUN apt-get update && apt-get install -y python3-pip libsqlite3-dev",
+    "RUN pip install --no-cache-dir --upgrade pip",
+    "RUN pip install --no-cache-dir -r requirements.txt",
+    "VOLUME [\"/app/music_store_vectors\"]"
   ]
 }

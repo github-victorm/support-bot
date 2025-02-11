@@ -1,0 +1,8 @@
+{
+  "name": "sql-support-bot",
+  "version": "1.0.0",
+  "description": "Music store support bot using LangGraph",
+  "private": true,
+  "dependencies": {},
+  "devDependencies": {}
+}
