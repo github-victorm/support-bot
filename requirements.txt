@@ -1,0 +1,13 @@
+langgraph>=0.2.70
+langchain>=0.1.0
+langchain-core>=0.1.0
+langchain-openai>=0.0.5
+langchain-community>=0.0.13
+python-dotenv>=1.0.0
+streamlit>=1.32.0
+pandas>=2.2.0
+SQLAlchemy>=2.0.25
+aiosqlite>=0.20.0
+langsmith>=0.1.0
+pydantic>=2.0.0
+chromadb>=0.4.22 

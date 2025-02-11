@@ -1,0 +1,20 @@
+[project]
+name = "music-store-support"
+version = "0.1.0"
+description = "Music store support bot using LangGraph"
+
+[tool.langgraph]
+graphs = [
+    {
+        "module": "music_store_agent",
+        "variable": "create_support_graph",
+        "name": "music_store_support"
+    }
+]
+
+[tool.langgraph.env]
+required = [
+    "OPENAI_API_KEY",
+    "LANGSMITH_API_KEY",
+    "LANGSMITH_PROJECT"
+] 
