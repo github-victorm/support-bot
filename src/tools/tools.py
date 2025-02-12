@@ -384,70 +384,79 @@ def update_profile(updates: dict, config: RunnableConfig) -> str:
         conn.close()
 
 @tool
-def parse_track_selection(selection: str, config: RunnableConfig) -> dict:
-    """Parse user's track selection from previous recommendations.
-    The selection can be track numbers (e.g., "tracks 1, 3, and 5") or specific track names.
+def parse_track_selection(config: RunnableConfig, selected_track_ids: list[int] = None, selected_tracks: list[str] = None) -> dict:
+    """Get details for the selected tracks to prepare for purchase.
     
     Args:
-        selection: User's track selection text
         config: Configuration containing track information
+        selected_track_ids: List of track IDs selected by the user
+        selected_tracks: Backup list of track names/descriptions to search for if IDs fail
     
     Returns:
         A dictionary containing the selected track IDs and preview
     """
     try:
-        # Get track info from configurable
-        track_info = config.get("configurable", {}).get("track_info", {})
-        if not track_info:
-            return {
-                "status": "error",
-                "message": "No recent recommendations found. Please search for music first."
-            }
+        # Get track info from messages history first
+        messages = config.get("messages", [])
+        track_info = None
         
-        selected_tracks = []
-        
-        # Try to parse track numbers (e.g., "tracks 1, 3, and 5")
-        import re
-        numbers = re.findall(r'\d+', selection)
-        if numbers:
-            # Numbers are already 1-based from the display
-            for num in numbers:
-                if num in track_info:
-                    selected_tracks.append(track_info[num])
-        
-        # If no numbers found or no valid tracks, try matching track names
-        if not selected_tracks:
-            selection_lower = selection.lower()
-            for track in track_info.values():
-                if track["track_name"].lower() in selection_lower or \
-                   track["artist"].lower() in selection_lower:
-                    selected_tracks.append(track)
-        
-        if not selected_tracks:
-            # Try direct track ID lookup if we have it
-            track_ids = config.get("configurable", {}).get("track_ids", [])
-            if track_ids:
-                # Find the track in track_info that matches the selection
-                for track_data in track_info.values():
-                    if track_data["track_name"].lower() == selection.lower():
-                        selected_tracks.append(track_data)
+        # Look for the most recent get_recommendations response
+        for message in reversed(messages):
+            if isinstance(message, dict) and message.get("name") == "get_recommendations":
+                content = message.get("content")
+                if isinstance(content, str):
+                    import json
+                    try:
+                        content_dict = json.loads(content)
+                        track_info = content_dict.get("track_info", {})
                         break
+                    except json.JSONDecodeError:
+                        continue
         
-        if not selected_tracks:
+        selected_tracks_info = []
+        
+        # Try track IDs first if provided
+        if selected_track_ids and track_info:
+            for track in track_info.values():
+                if track["track_id"] in selected_track_ids:
+                    selected_tracks_info.append(track)
+        
+        # If no tracks found and we have track names, try semantic search
+        if not selected_tracks_info and selected_tracks:
+            try:
+                vector_store = get_vector_store()
+                for track_name in selected_tracks:
+                    # Search for each track individually to get best matches
+                    docs = vector_store.similarity_search(track_name, k=1)
+                    if docs:
+                        doc = docs[0]
+                        track = {
+                            "track_id": int(doc.metadata['track_id']),
+                            "track_name": doc.metadata['track_name'],
+                            "artist": doc.metadata['artist'],
+                            "album": doc.metadata['album'],
+                            "genre": doc.metadata['genre'],
+                            "price": float(doc.metadata['price'])
+                        }
+                        selected_tracks_info.append(track)
+            except Exception as e:
+                logger.error(f"Error in semantic search fallback: {str(e)}")
+        
+        if not selected_tracks_info:
             return {
                 "status": "error",
-                "message": "Could not identify any tracks from your selection. Please specify track numbers or names more clearly."
+                "message": "Could not find the selected tracks. Please try searching again or specify the tracks more clearly."
             }
         
         # Format the preview and prepare track IDs for purchase
-        track_ids = [track["track_id"] for track in selected_tracks]
-        total = sum(float(track['price']) for track in selected_tracks)
+        track_ids = [track["track_id"] for track in selected_tracks_info]
+        total = sum(float(track['price']) for track in selected_tracks_info)
         
         return {
             "status": "success",
             "message": "Selected tracks for purchase:\n" + "\n".join(
                 f"- {track['track_name']} by {track['artist']} (${float(track['price']):.2f})"
-                for track in selected_tracks
+                for track in selected_tracks_info
             ) + f"\n\nTotal: ${total:.2f}",
             "track_ids": track_ids
         }
