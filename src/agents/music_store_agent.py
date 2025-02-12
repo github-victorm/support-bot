@@ -47,7 +47,7 @@ check_api_keys()
 client = setup_langsmith()
 
 # Initialize the LLM
-llm = ChatOpenAI(temperature=0.0, model="gpt-4o-mini")
+llm = ChatOpenAI(temperature=0.0, model="gpt-4o")
 
 assistant_prompt = ChatPromptTemplate.from_messages(
     [
