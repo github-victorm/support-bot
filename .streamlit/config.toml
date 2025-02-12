@@ -1,0 +1,15 @@
+[theme]
+base="dark"
+primaryColor="#1d3d3c"
+secondaryBackgroundColor="#202020"
+font="monospace"
+
+[server]
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[logger]
+level = "info" 

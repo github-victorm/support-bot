@@ -5,9 +5,15 @@ from langsmith import Client
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.WARNING,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+# Silence specific loggers
+logging.getLogger('langsmith').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('chromadb').setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -22,7 +28,6 @@ def setup_langsmith():
             os.environ["LANGCHAIN_TAGS"] = "production" if os.getenv("PRODUCTION") else "development"
             os.environ["LANGCHAIN_CALLBACKS_BACKGROUND"] = "true"
             client = Client()
-            logger.info("LangSmith tracking enabled")
             return client
         except Exception as e:
             logger.warning(f"Failed to initialize LangSmith: {str(e)}")
