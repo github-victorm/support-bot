@@ -145,14 +145,17 @@ if st.session_state.customer_id:
                     }
                 }
                 
-                # Check if this is a response to a tool call
+                # Check graph state and handle approvals
                 snapshot = graph.get_state(config)
-                if snapshot and snapshot.next and prompt.strip().lower() == 'y':
-                    # Just continue with None for approval
-                    result = graph.invoke(None, config)
-                elif snapshot and snapshot.next:
-                    # Just send the user's feedback as a new message
-                    result = graph.invoke(state, config)
+                
+                if snapshot and snapshot.next:
+                    # We're in an approval state
+                    if prompt.strip().lower() in ['y', 'yes']:
+                        # User approved, continue with approval
+                        result = graph.invoke(None, config)
+                    else:
+                        # User provided feedback or declined
+                        result = graph.invoke(state, config)
                 else:
                     # Normal message flow
                     result = graph.invoke(state, config)
@@ -161,28 +164,32 @@ if st.session_state.customer_id:
                 if result and "messages" in result:
                     # Get only the last message from the assistant
                     last_message = result["messages"][-1]
-                    content = last_message.content if hasattr(last_message, 'content') else str(last_message)
+                    
+                    # Extract content safely
+                    if hasattr(last_message, 'content'):
+                        content = last_message.content
+                    else:
+                        content = str(last_message)
                     
                     # Handle dictionary responses
                     if isinstance(content, dict):
-                        # Store track info if present
+                        # Update track info in session state
                         if "track_info" in content:
                             st.session_state.track_info = content["track_info"]
-                            config["configurable"]["track_info"] = content["track_info"]
-                        # Get the human-readable message
-                        if "message" in content and isinstance(content["message"], str):
-                            message = content["message"]
+                        
+                        # Extract message from dictionary
+                        message = content.get("message", None)
+                        if not message and "error" in content:
+                            message = f"Error: {content['error']}"
                     
-                    # Handle string messages if they're meaningful
-                    elif content and isinstance(content, str) and content.strip():
-                        # Skip raw data responses
-                        if not any([
-                            content.startswith("{") and content.endswith("}"),  # JSON objects
-                            content.startswith("[") and content.endswith("]"),  # JSON arrays
-                            content.startswith("Tool Calls:"),  # Tool call info
-                            "call_" in content,  # Tool call IDs
-                            "toolu_" in content,  # Tool IDs
-                        ]) and not content.strip().startswith(("Name:", "Call ID:", "Args:")):
+                    # Handle string messages
+                    elif isinstance(content, str):
+                        content = content.strip()
+                        # Only filter out obvious tool/internal messages
+                        if content and not (
+                            content.startswith(("{", "[", "Tool Calls:")) or
+                            any(marker in content.lower() for marker in ["call_", "toolu_", "args:"])
+                        ):
                             message = content
                     
                 # Check if we need approval for a sensitive tool
@@ -198,7 +205,8 @@ if st.session_state.customer_id:
                 })
             
             if needs_approval:
-                st.info("Type 'y' to proceed or provide feedback if you want to change anything.")
+                st.info("Type 'yes' or 'y' to approve, or provide feedback if you want to change anything.")
+                st.caption("This action requires your explicit approval because it involves sensitive operations.")
         
         except Exception as e:
             error_message = f"I apologize, but I encountered an error: {str(e)}"
