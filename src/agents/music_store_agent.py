@@ -17,8 +17,8 @@ from langgraph.prebuilt import tools_condition
 
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
-    customer_info: dict  # Store full customer information
-    selected_tracks: list[int] | None  # Store selected track IDs for purchase
+    customer_info: dict  # Customer data cache
+    selected_tracks: list[int] | None  # Tracks user wants to buy
 
 class Assistant:
     def __init__(self, runnable: Runnable):
@@ -27,8 +27,8 @@ class Assistant:
     def __call__(self, state: State, config: RunnableConfig):
         while True:
             result = self.runnable.invoke(state)
-            # If the LLM happens to return an empty response, we will re-prompt it
-            # for an actual response.
+            # Sometimes the LLM returns empty/error responses
+            # Just kick it to try again in those cases
             if not result.tool_calls and (
                 not result.content
                 or isinstance(result.content, dict) and result.content.get("status") == "error"
@@ -40,13 +40,13 @@ class Assistant:
                 break
         return {"messages": result}
 
-# Check for API keys
+# Need API keys to run this thing
 check_api_keys()
 
-# Initialize LangSmith
+# Setup tracing
 client = setup_langsmith()
 
-# Initialize the LLM
+# Load up the brain
 llm = ChatOpenAI(temperature=0.0, model="gpt-4o")
 
 assistant_prompt = ChatPromptTemplate.from_messages(
@@ -93,52 +93,80 @@ Remember to be conversational and helpful while ensuring secure and accurate tra
 ).partial(time=datetime.now)
 
 
+# Split tools into ones that need approval and ones that don't
 safe_tools = [get_recommendations, query_invoice_history, fetch_customer_info, parse_track_selection]
 sensitive_tools = [process_purchase, request_refund, update_profile]
 
+# Quick lookup for tool names
 safe_tool_names = {t.name for t in safe_tools}
 sensitive_tool_names = {t.name for t in sensitive_tools}
 
+# Hook up the prompt to the LLM with all tools attached
 assistant_runnable = assistant_prompt | llm.bind_tools(safe_tools + sensitive_tools)
 
+# Start building our graph
 builder = StateGraph(State)
 
-# Add nodes for the assistant and tools
+# Add all the nodes we need
 builder.add_node("assistant", Assistant(assistant_runnable))
 builder.add_node("safe_tools", create_tool_node_with_fallback(safe_tools))
 builder.add_node(
     "sensitive_tools", create_tool_node_with_fallback(sensitive_tools)
 )
 
-# Define edges - start with assistant
+# Start with the assistant
 builder.add_edge(START, "assistant")
 
 def route_tools(state: State):
     next_node = tools_condition(state)
-    # If no tools are invoked, return to the user
+    # No tools? Just go back to the user
     if next_node == END:
         return END
+    
     ai_message = state["messages"][-1]
-    # This assumes single tool calls. To handle parallel tool calling, you'd want to
-    # use an ANY condition
+    # We only handle one tool at a time for now
+    # Would need ANY condition for parallel tools
     first_tool_call = ai_message.tool_calls[0]
+    
+    # Route to the right node based on if tool needs approval
     if first_tool_call["name"] in sensitive_tool_names:
         return "sensitive_tools"
     return "safe_tools"
 
-
+# Hook up all the edges between nodes
 builder.add_conditional_edges(
     "assistant", route_tools, ["safe_tools", "sensitive_tools", END]
 )
 builder.add_edge("safe_tools", "assistant")
 builder.add_edge("sensitive_tools", "assistant")
 
+# Set up memory to keep track of state
 memory = MemorySaver()
+# Compile the whole graph, adding interrupt points
 graph = builder.compile(
     checkpointer=memory,
-    # NEW: The graph will always halt before executing the "tools" node.
-    # The user can approve or reject (or even alter the request) before
-    # the assistant continues
+    # Stop and ask for permission before doing sensitive stuff
+    # User can review/approve/reject at this point
     interrupt_before=["sensitive_tools"],
 )
+
+# Usage examples (commented out):
+# 1. Run the graph until it hits a sensitive tool
+# thread = {"configurable": {"thread_id": "unique_thread_id"}}
+# for event in graph.stream(inputs, thread, stream_mode="values"):
+#     print(event)
+#
+# 2. User approves - continue with no changes
+# for event in graph.stream(None, thread, stream_mode="values"):
+#     print(event)
+#
+# 3. Edit the tool call before approving
+# graph.update_state(thread, {"messages": [edited_messages]})
+# for event in graph.stream(None, thread, stream_mode="values"):
+#     print(event)
+#
+# 4. User cancels
+# graph.update_state(thread, {"messages": state["messages"] + [("user", "I've decided to cancel this operation.")]})
+# for event in graph.stream(None, thread, stream_mode="values"):
+#     print(event)
 
