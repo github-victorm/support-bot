@@ -358,8 +358,6 @@ if st.session_state.customer_id:
                     # New conversation
                     state = {
                         "messages": [("user", prompt)],
-                        "customer_info": {},
-                        "selected_tracks": None
                     }
                     result = graph.invoke(state, config=config)
                 

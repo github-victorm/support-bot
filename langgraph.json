@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "agent": "src.agents.music_store_agent:graph"
+  },
+  "env": ".env"
+}

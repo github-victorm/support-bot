@@ -3,6 +3,7 @@ import logging
 from ..utils.database import get_db, get_vector_store
 from langchain_core.runnables import RunnableConfig
 import sqlite3
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +27,13 @@ def get_recommendations(query: str, config: RunnableConfig) -> list[dict]:
                 "message": "Please provide a search query describing what kind of music you're looking for"
             }
         
-        # Get the vector store instance
-        vector_store = get_vector_store()
+        # Try to get the vector store instance
+        try:
+            vector_store = get_vector_store()
+        except RuntimeError as e:
+            # Fallback to database search if vector store is not available
+            logger.warning(f"Vector store error: {str(e)}. Using database fallback.")
+            return get_recommendations_fallback(query, config)
         
         # Create a simple retriever with MMR search for better result diversity
         retriever = vector_store.as_retriever(
@@ -402,15 +408,57 @@ def parse_track_selection(config: RunnableConfig, selected_track_ids: list[int] 
         
         # Look for the most recent get_recommendations response
         for message in reversed(messages):
-            if isinstance(message, dict) and message.get("name") == "get_recommendations":
-                content = message.get("content")
-                if isinstance(content, str):
-                    import json
+            # Try multiple ways to extract track info from message history
+            if isinstance(message, dict):
+                # Check if this is a tool message with get_recommendations
+                if message.get("name") == "get_recommendations":
+                    content = message.get("content")
+                    if isinstance(content, str):
+                        import json
+                        try:
+                            content_dict = json.loads(content)
+                            track_info = content_dict.get("track_info", {})
+                            if track_info:
+                                break
+                        except json.JSONDecodeError:
+                            continue
+                
+                # Also check for tool_calls that might have recommendations
+                tool_calls = message.get("tool_calls", [])
+                if tool_calls and isinstance(tool_calls, list):
+                    for tool_call in tool_calls:
+                        if isinstance(tool_call, dict) and tool_call.get("name") == "get_recommendations":
+                            try:
+                                content = tool_call.get("content")
+                                if content and isinstance(content, str):
+                                    content_dict = json.loads(content)
+                                    track_info = content_dict.get("track_info", {})
+                                    if track_info:
+                                        break
+                            except (json.JSONDecodeError, AttributeError):
+                                continue
+        
+        # If we still don't have track info, try parsing the raw content of any message
+        if not track_info:
+            for message in reversed(messages):
+                content = None
+                if isinstance(message, dict):
+                    content = message.get("content")
+                if content and isinstance(content, str) and "{" in content and "track_info" in content:
                     try:
-                        content_dict = json.loads(content)
-                        track_info = content_dict.get("track_info", {})
-                        break
-                    except json.JSONDecodeError:
+                        # Try to extract JSON from the content
+                        import re
+                        json_match = re.search(r'(\{.*"track_info":.+\})', content, re.DOTALL)
+                        if json_match:
+                            potential_json = json_match.group(1)
+                            try:
+                                content_dict = json.loads(potential_json)
+                                track_info = content_dict.get("track_info", {})
+                                if track_info:
+                                    break
+                            except json.JSONDecodeError:
+                                continue
+                    except Exception:
                         continue
         
         selected_tracks_info = []
@@ -442,6 +490,42 @@ def parse_track_selection(config: RunnableConfig, selected_track_ids: list[int] 
             except Exception as e:
                 logger.error(f"Error in semantic search fallback: {str(e)}")
         
+        # If still no tracks found, fall back to using just the track IDs directly
+        if not selected_tracks_info and selected_track_ids:
+            try:
+                import sqlite3
+                conn = sqlite3.connect(DB_PATH)
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                for track_id in selected_track_ids:
+                    cursor.execute("""
+                        SELECT t.TrackId, t.Name as track_name, ar.Name as artist, 
+                               al.Title as album, g.Name as genre, t.UnitPrice as price
+                        FROM Track t
+                        JOIN Album al ON t.AlbumId = al.AlbumId
+                        JOIN Artist ar ON al.ArtistId = ar.ArtistId
+                        JOIN Genre g ON t.GenreId = g.GenreId
+                        WHERE t.TrackId = ?
+                    """, (track_id,))
+                    
+                    row = cursor.fetchone()
+                    if row:
+                        track = {
+                            "track_id": row["TrackId"],
+                            "track_name": row["track_name"],
+                            "artist": row["artist"], 
+                            "album": row["album"],
+                            "genre": row["genre"],
+                            "price": float(row["price"])
+                        }
+                        selected_tracks_info.append(track)
+                
+                cursor.close()
+                conn.close()
+            except Exception as e:
+                logger.error(f"Error in database fallback: {str(e)}")
+        
         if not selected_tracks_info:
             return {
                 "status": "error",
@@ -466,6 +550,135 @@ def parse_track_selection(config: RunnableConfig, selected_track_ids: list[int] 
         return {
             "status": "error",
             "message": f"Error parsing track selection: {str(e)}"
+        }
+
+def get_recommendations_fallback(query: str, config: RunnableConfig) -> dict:
+    """Fallback method for getting recommendations when vector store isn't available.
+    Uses direct database queries based on keywords in the query."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Extract potential keywords from the query
+        # This is a simple keyword extraction, not as good as vector search
+        keywords = re.findall(r'\b\w+\b', query.lower())
+        genre_keywords = []
+        artist_keywords = []
+        album_keywords = []
+        
+        # Common genre words that might appear in queries
+        common_genres = ["rock", "pop", "jazz", "blues", "classical", "metal", 
+                        "punk", "hip hop", "rap", "country", "folk", "electronic", 
+                        "dance", "reggae", "indie", "alternative"]
+        
+        for word in keywords:
+            if word in common_genres:
+                genre_keywords.append(word)
+            elif len(word) > 3:  # Only consider words with more than 3 chars for artist/album search
+                artist_keywords.append(word)
+                album_keywords.append(word)
+        
+        # Start building the query
+        sql_query = """
+            SELECT 
+                t.TrackId, t.Name as track_name, ar.Name as artist, 
+                al.Title as album, g.Name as genre, t.UnitPrice as price
+            FROM Track t
+            JOIN Album al ON t.AlbumId = al.AlbumId
+            JOIN Artist ar ON al.ArtistId = ar.ArtistId
+            JOIN Genre g ON t.GenreId = g.GenreId
+            WHERE 1=1
+        """
+        params = []
+        
+        # Add genre filters if relevant
+        if genre_keywords:
+            genre_clauses = []
+            for genre in genre_keywords:
+                genre_clauses.append("g.Name LIKE ?")
+                params.append(f"%{genre}%")
+            
+            if genre_clauses:
+                sql_query += " AND (" + " OR ".join(genre_clauses) + ")"
+        
+        # Add artist filters if relevant
+        if artist_keywords and not genre_keywords:  # Only apply if no genre filters
+            artist_clauses = []
+            for artist in artist_keywords:
+                artist_clauses.append("ar.Name LIKE ?")
+                params.append(f"%{artist}%")
+            
+            if artist_clauses:
+                sql_query += " AND (" + " OR ".join(artist_clauses) + ")"
+        
+        # Add album filters if no other filters
+        if album_keywords and not genre_keywords and not artist_keywords:
+            album_clauses = []
+            for album in album_keywords:
+                album_clauses.append("al.Title LIKE ?")
+                params.append(f"%{album}%")
+            
+            if album_clauses:
+                sql_query += " AND (" + " OR ".join(album_clauses) + ")"
+        
+        # Limit to 10 random results
+        sql_query += " ORDER BY RANDOM() LIMIT 10"
+        
+        cursor.execute(sql_query, params)
+        rows = cursor.fetchall()
+        
+        if not rows:
+            # If no results, return a general sample
+            cursor.execute("""
+                SELECT 
+                    t.TrackId, t.Name as track_name, ar.Name as artist, 
+                    al.Title as album, g.Name as genre, t.UnitPrice as price
+                FROM Track t
+                JOIN Album al ON t.AlbumId = al.AlbumId
+                JOIN Artist ar ON al.ArtistId = ar.ArtistId
+                JOIN Genre g ON t.GenreId = g.GenreId
+                ORDER BY RANDOM()
+                LIMIT 10
+            """)
+            rows = cursor.fetchall()
+        
+        tracks = []
+        message_lines = [f"Here are some recommendations based on your search for '{query}':"]
+        
+        for i, row in enumerate(rows, 1):
+            track = {
+                "track_id": row["TrackId"],
+                "track_name": row["track_name"],
+                "artist": row["artist"],
+                "album": row["album"],
+                "genre": row["genre"],
+                "price": float(row["price"])
+            }
+            tracks.append(track)
+            
+            message_lines.append(
+                f"{i}. {track['track_name']} by {track['artist']} "
+                f"(Album: {track['album']}, Genre: {track['genre']}, "
+                f"Price: ${track['price']:.2f})"
+            )
+        
+        cursor.close()
+        conn.close()
+        
+        # Return structured response
+        return {
+            "status": "success",
+            "message": "\n".join(message_lines),
+            "track_info": {str(i): track for i, track in enumerate(tracks, 1)},
+            "track_ids": [track["track_id"] for track in tracks]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in get_recommendations_fallback: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Sorry, I couldn't find any music recommendations at the moment. The music catalog seems to be unavailable. Please try again later."
         }
 
     

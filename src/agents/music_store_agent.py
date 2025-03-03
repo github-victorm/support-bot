@@ -2,8 +2,9 @@ from ..config.settings import setup_langsmith, check_api_keys
 from ..tools.tools import query_invoice_history, get_recommendations, request_refund, process_purchase
 from ..tools.tools import update_profile, fetch_customer_info, parse_track_selection, parse_track_selection
 from ..utils.helpers import create_tool_node_with_fallback
+from ..utils.database import initialize_vector_store
 
-from typing import Annotated, Literal
+from typing import Annotated
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig
@@ -17,8 +18,6 @@ from langgraph.prebuilt import tools_condition
 
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
-    customer_info: dict  # Customer data cache
-    selected_tracks: list[int] | None  # Tracks user wants to buy
 
 class Assistant:
     def __init__(self, runnable: Runnable):
@@ -45,6 +44,14 @@ check_api_keys()
 
 # Setup tracing
 client = setup_langsmith()
+
+# Initialize vector store - needed for recommendations and other operations
+# This ensures it's available when running in Langgraph Studio
+try:
+    initialize_vector_store()
+except Exception as e:
+    print(f"Warning: Failed to initialize vector store: {str(e)}")
+    print("Some recommendations features may not work properly.")
 
 # Load up the brain
 llm = ChatOpenAI(temperature=0.0, model="gpt-4o")
@@ -149,24 +156,4 @@ graph = builder.compile(
     # User can review/approve/reject at this point
     interrupt_before=["sensitive_tools"],
 )
-
-# Usage examples (commented out):
-# 1. Run the graph until it hits a sensitive tool
-# thread = {"configurable": {"thread_id": "unique_thread_id"}}
-# for event in graph.stream(inputs, thread, stream_mode="values"):
-#     print(event)
-#
-# 2. User approves - continue with no changes
-# for event in graph.stream(None, thread, stream_mode="values"):
-#     print(event)
-#
-# 3. Edit the tool call before approving
-# graph.update_state(thread, {"messages": [edited_messages]})
-# for event in graph.stream(None, thread, stream_mode="values"):
-#     print(event)
-#
-# 4. User cancels
-# graph.update_state(thread, {"messages": state["messages"] + [("user", "I've decided to cancel this operation.")]})
-# for event in graph.stream(None, thread, stream_mode="values"):
-#     print(event)
 

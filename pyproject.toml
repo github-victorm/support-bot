@@ -2,14 +2,35 @@
 name = "music-store-support"
 version = "0.1.0"
 description = "Music store support bot using LangGraph"
+dependencies = [
+    "langchain-core>=0.1.0",
+    "langchain-openai>=0.0.5",
+    "langchain-community>=0.0.20",
+    "langgraph>=0.3.2",
+    "langgraph-prebuilt>=0.1.1",
+    "chromadb>=0.4.0",
+    "langchain-chroma>=0.1.2",
+    "python-dotenv>=1.0.0",
+    "streamlit>=1.30.0",
+    "langsmith>=0.1.0",
+    "sqlite-utils>=3.35.0",
+    "watchdog>=3.0.0",
+    "protobuf>=4.25.1",
+    "typing-extensions>=4.9.0",
+    "pydantic>=2.5.0",
+    "toml>=0.10.2",
+    "langgraph-cli[inmem]>=0.1.71"
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.1.4",
+    "pytest>=7.4.3"
+]
 
 [tool.langgraph]
 graphs = [
-    {
-        "module": "music_store_agent",
-        "variable": "create_support_graph",
-        "name": "music_store_support"
-    }
+    { module = "src.agents.music_store_agent", variable = "graph", name = "music_store" }
 ]
 
 [tool.langgraph.env]
@@ -17,4 +38,25 @@ required = [
     "OPENAI_API_KEY",
     "LANGSMITH_API_KEY",
     "LANGSMITH_PROJECT"
-] 
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.yaml", "*.txt"]
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "W", "I", "D"]
+ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D107"]
+
+[tool.ruff.isort]
+known-first-party = ["src"]
+
+[tool.ruff.pydocstyle]
+convention = "google"
