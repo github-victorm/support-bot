@@ -38,7 +38,7 @@ def get_recommendations(query: str, config: RunnableConfig) -> list[dict]:
         # Create a simple retriever with MMR search for better result diversity
         retriever = vector_store.as_retriever(
             search_type="mmr",
-            search_kwargs={"k": 10}
+            search_kwargs={"k": 5}
         )
         
         # Get recommendations using the newer invoke method

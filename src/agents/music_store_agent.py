@@ -6,14 +6,13 @@ from ..utils.database import initialize_vector_store
 
 from typing import Annotated
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnableConfig
 from typing_extensions import TypedDict
 from langgraph.graph.message import AnyMessage, add_messages
-from datetime import datetime
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, END, START
 from langgraph.prebuilt import tools_condition
+from langchain import hub
 
 
 class State(TypedDict):
@@ -26,8 +25,8 @@ class Assistant:
     def __call__(self, state: State, config: RunnableConfig):
         while True:
             result = self.runnable.invoke(state)
-            # Sometimes the LLM returns empty/error responses
-            # Just kick it to try again in those cases
+            # Sometimes the LLM returns empty/error responses, simply try a quick retry.
+            
             if not result.tool_calls and (
                 not result.content
                 or isinstance(result.content, dict) and result.content.get("status") == "error"
@@ -56,49 +55,8 @@ except Exception as e:
 # Load up the brain
 llm = ChatOpenAI(temperature=0.0, model="gpt-4o")
 
-assistant_prompt = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            """You are a helpful music store assistant for an online digital music store. You help customers discover, 
-purchase, and manage their music collection.
-
-1. Music Discovery and Recommendations:
-   - Search for music based on genres, moods, styles, or similarity to other songs using the get_recommendations tool
-   - Show detailed track information including artists, albums, and prices
-   - Customers DO NOT have logged preferences so if you need clarification on what they want, ask them to specify their preferences
-
-2. Purchase Management:
-   - Parse track selections from recommendations (by track numbers or names) using the parse_track_selection tool
-   - Preview purchase details before confirmation using the process_purchase tool
-   - Process music track purchases after user confirmation
-   - Show complete purchase history with the query_invoice_history tool 
-   - Handle refund requests for previous purchases using the request_refund tool
-
-3. Profile Management:
-    - Get customer information using the fetch_customer_info tool.
-   - Update customer contact information using the update_profile tool
-   - Modify billing/shipping addresses using the update_profile tool
-   - Update customer details using the update_profile tool
-
-When assisting customers:
-- Only process requests from the customer who is currently logged in
-- For purchases, always show a preview first before completing the transaction
-- When recommending music, be creative and consider various aspects (genre, mood, style) depending on the query.
-- If a search returns no results, try broadening the search criteria
-- Provide clear explanations for any errors or issues
-- For purchases from recommendations, help users select tracks by number (e.g., "tracks 1, 3, and 5") or by name
-
-Remember to be conversational and helpful while ensuring secure and accurate transactions.
-"""
-        ),
-        (
-            "placeholder",
-            "{messages}"
-        )
-    ]
-).partial(time=datetime.now)
-
+# Load prompt from langchain hub
+prompt = hub.pull("music-store-agent-prompt")
 
 # Split tools into ones that need approval and ones that don't
 safe_tools = [get_recommendations, query_invoice_history, fetch_customer_info, parse_track_selection]
@@ -109,7 +67,7 @@ safe_tool_names = {t.name for t in safe_tools}
 sensitive_tool_names = {t.name for t in sensitive_tools}
 
 # Hook up the prompt to the LLM with all tools attached
-assistant_runnable = assistant_prompt | llm.bind_tools(safe_tools + sensitive_tools)
+assistant_runnable = prompt | llm.bind_tools(safe_tools + sensitive_tools)
 
 # Start building our graph
 builder = StateGraph(State)
@@ -124,6 +82,7 @@ builder.add_node(
 # Start with the assistant
 builder.add_edge(START, "assistant")
 
+# Route to the right node based on if tool needs approval
 def route_tools(state: State):
     next_node = tools_condition(state)
     # No tools? Just go back to the user
