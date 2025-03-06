@@ -37,9 +37,8 @@ def get_recommendations(query: str, config: RunnableConfig) -> list[dict]:
         
         # Create a simple retriever with Maximal Marginal Relevance balancing relevance and diversity
         retriever = vector_store.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": 5},
-
+            search_type="mmr",
+            search_kwargs={"k": 5}
         )
         
         # Get recommendations using the newer invoke method
