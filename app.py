@@ -77,7 +77,7 @@ def is_sensitive_tool(tool_name):
     from src.agents.music_store_agent import sensitive_tool_names
     return tool_name in sensitive_tool_names
 
-# Sidebar stuff
+# Sidebar components
 with st.sidebar:
     st.title("🎵 Music Store")
     st.markdown("---")

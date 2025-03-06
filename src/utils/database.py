@@ -7,7 +7,6 @@ import os
 import logging
 from typing import Optional
 import chromadb
-from chromadb.config import Settings
 
 logger = logging.getLogger(__name__)
 
