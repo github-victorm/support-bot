@@ -1,6 +1,6 @@
 from langchain_core.tools import tool
 import logging
-from ..utils.database import get_db, get_vector_store
+from ..utils.database import get_vector_store
 from langchain_core.runnables import RunnableConfig
 import sqlite3
 import re
@@ -35,10 +35,11 @@ def get_recommendations(query: str, config: RunnableConfig) -> list[dict]:
             logger.warning(f"Vector store error: {str(e)}. Using database fallback.")
             return get_recommendations_fallback(query, config)
         
-        # Create a simple retriever with MMR search for better result diversity
+        # Create a simple retriever with Maximal Marginal Relevance balancing relevance and diversity
         retriever = vector_store.as_retriever(
-            search_type="mmr",
-            search_kwargs={"k": 5}
+            search_type="similarity",
+            search_kwargs={"k": 5},
+
         )
         
         # Get recommendations using the newer invoke method
@@ -119,7 +120,7 @@ def query_invoice_history(config: RunnableConfig) -> list[dict]:
     JOIN Genre g ON t.GenreId = g.GenreId
     WHERE i.CustomerId = ?
     ORDER BY i.InvoiceDate DESC
-    LIMIT 10
+    LIMIT 5
     """
 
     cursor.execute(query, [customer_id])

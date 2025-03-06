@@ -52,7 +52,7 @@ except Exception as e:
     print(f"Warning: Failed to initialize vector store: {str(e)}")
     print("Some recommendations features may not work properly.")
 
-# Load up the brain
+# Load up the model
 llm = ChatOpenAI(temperature=0.0, model="gpt-4o")
 
 # Load prompt from langchain hub
